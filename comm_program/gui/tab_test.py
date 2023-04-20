@@ -111,8 +111,8 @@ class TestTab(QWidget):
         self.ma_series.attachAxis(self.axis_Y_ma)
 
         # Set chart titles
-        self.mv_chart.setTitle("Millivolts Test Metrics")
-        self.ma_chart.setTitle("Milliamps Test Metrics")
+        self.mv_chart.setTitle("Millivolt Test Metrics")
+        self.ma_chart.setTitle("Milliamp Test Metrics")
 
         self.mv_chart_view = QChartView(self.mv_chart)
         self.ma_chart_view = QChartView(self.ma_chart)
@@ -175,6 +175,7 @@ class TestTab(QWidget):
                 # check status of worker
                 if self.worker.running:
                     self.worker.stop(force=True)
+                del self.worker
                 self.run_test_button.setText("Run Test")
 
     def update_plots(self, time, mv, ma):
@@ -196,6 +197,9 @@ class TestTab(QWidget):
         file_path = file_name + ".pdf" if not file_name.endswith(".pdf") else file_name
         mv_chart_cp = copy_chart_properties(self.mv_chart)
         ma_chart_cp = copy_chart_properties(self.ma_chart)
+        mv_analysis = analyze_data(self.mv_series)
+        ma_analysis = analyze_data(self.ma_series)
+        print(mv_analysis)
 
         # Create a QTextDocument
         doc = QTextDocument()
@@ -226,7 +230,10 @@ class TestTab(QWidget):
 
         cursor.insertHtml(
             "<br><p>As we can see in Chart 1, the millivolt outputs of our test device provide valuable insights "
-            "into the electrifying performance of the Electron rocket. </p>"
+            "into the electrifying performance of the Electron rocket. We have a maximum millivolt value of"
+            f" {round(mv_analysis['max'],2)} millivolts, minimum of {round(mv_analysis['min'],2)} millivolts"
+            f" and an average of {round(mv_analysis['avg'],2)} millivolts over a total duration of"
+            f" {round(mv_analysis['duration'],2)} seconds.</p>"
         )
 
         image2 = format_chart(ma_chart_cp).toImage()
@@ -235,6 +242,13 @@ class TestTab(QWidget):
         cursor.insertImage(image2)
         cursor.insertBlock(block_format)
         cursor.insertHtml("<i>Chart 2: Milliamp outputs of the test device</i>")
+
+        cursor.insertHtml(
+            "<br><p>As we can see in Chart 2, we have a maximum millivolt value of"
+            f" {round(ma_analysis['max'],2)} millivolts, minimum of {round(ma_analysis['min'],2)} millivolts"
+            f" and an average of {round(ma_analysis['avg'],2)} millivolts over a total duration of"
+            f" {round(ma_analysis['duration'],2)} seconds.</p>"
+        )
 
         # Insert conclusion
         cursor.movePosition(QTextCursor.End)
@@ -450,3 +464,42 @@ def format_chart(chart):
     img = temp_chart_view1.grab()
     img = img.scaled(500, 500, Qt.KeepAspectRatio, Qt.SmoothTransformation)
     return img
+
+
+def qline_series_to_list(series):
+    """Convert a QLineSeries to a list of points.
+    
+    Args:
+        series (QLineSeries): The series to convert.
+    
+    Returns:
+        list: A list of points.
+    """
+    points_list = []
+    for i in range(series.count()):
+        point = series.at(i)
+        points_list.append((point.x(), point.y()))
+    return points_list
+
+def analyze_data(series):
+    """Analyze the data from a test.
+
+    Args:
+        series (QLineSeries): The series containing the data to analyze.
+
+    Returns:
+        dict: A dictionary containing the analysis results.
+    """
+    series_list = qline_series_to_list(series)
+
+    max_val = max(series_list, key=lambda x: x[1])[1]
+    min_val = min(series_list, key=lambda x: x[1])[1]
+    avg_val = sum([x[1] for x in series_list]) / len(series_list)
+    duration = series_list[-1][0] - series_list[0][0]
+
+    return {
+        "max": max_val,
+        "min": min_val,
+        "avg": avg_val,
+        "duration": duration,
+    }

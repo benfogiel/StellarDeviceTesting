@@ -83,7 +83,6 @@ private:
     Device &device_;
     sockaddr_in server_addr_;
     int server_fd_;
-    int client_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
 
     // Continuously listens for incoming requests
     void listen()
@@ -129,7 +128,7 @@ private:
             }
         }
 
-        ssize_t sent_bytes = sendto(client_fd_, to_iso_8859_1(frmt_msg).c_str(), frmt_msg.length(), 0, (const sockaddr *)&client_addr, sizeof(client_addr));
+        ssize_t sent_bytes = sendto(server_fd_, to_iso_8859_1(frmt_msg).c_str(), frmt_msg.length(), 0, (const sockaddr *)&client_addr, sizeof(client_addr));
         if (sent_bytes < 0)
         {
             std::cerr << "Error sending data." << std::endl;
