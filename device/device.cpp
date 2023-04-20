@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <atomic>
 
 // Device class represents a simulated device with a model, serial number, and idle state.
 class Device
@@ -83,6 +84,7 @@ private:
     Device &device_;
     sockaddr_in server_addr_;
     int server_fd_;
+    std::atomic<bool> test_running_{false};
 
     // Continuously listens for incoming requests
     void listen()
@@ -127,6 +129,8 @@ private:
                 frmt_msg += kv.first + "=" + kv.second + ";";
             }
         }
+
+        std::cout << "Sending message: " << frmt_msg << std::endl;
 
         ssize_t sent_bytes = sendto(server_fd_, to_iso_8859_1(frmt_msg).c_str(), frmt_msg.length(), 0, (const sockaddr *)&client_addr, sizeof(client_addr));
         if (sent_bytes < 0)
@@ -192,7 +196,7 @@ private:
         {
             if (request.find("CMD") != request.end() && request["CMD"] == "START")
             {
-                if (this->device_.get_is_idle() == false)
+                if (test_running_)
                 {
                     send_message({{"TYPE", "TEST"},
                                   {"RESULT", "ERROR1"},
@@ -212,7 +216,7 @@ private:
             }
             else if (request.find("TYPE") != request.end() && request["CMD"] == "STOP")
             {
-                if (this->device_.get_is_idle() == true)
+                if (!test_running_)
                 {
                     send_message({{"TYPE", "TEST"},
                                   {"RESULT", "ERROR2"},
@@ -223,6 +227,10 @@ private:
                 else
                 {
                     this->device_.set_is_idle(true);
+                    while (test_running_)
+                    {
+                        std::this_thread::yield(); // yield the current thread while waiting
+                    }
                     send_message({{"TYPE", "TEST"},
                                   {"RESULT", "STOPPED"}},
                                  client_addr);
@@ -245,7 +253,8 @@ private:
                       {"RESULT", "STARTED"}},
                      client_addr);
 
-        while (this->device_.get_is_idle() == false && std::chrono::steady_clock::now() < end_time)
+        test_running_ = true;
+        while (this->device_.get_is_idle() == false && std::chrono::steady_clock::now() <= end_time)
         {
             send_message({{"TYPE", "STATUS"},
                           {"TIME", std::to_string(
@@ -258,6 +267,7 @@ private:
                          client_addr);
             std::this_thread::sleep_for(rate);
         }
+        test_running_ = false;
         if (this->device_.get_is_idle() == false) // in the case that the test was stopped early
         {
             this->device_.set_is_idle(true);

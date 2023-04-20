@@ -132,15 +132,31 @@ class DeviceClient:
             tuple: A tuple containing the result code and a message describing the result.
         """
         self.send_msg("TEST;CMD=STOP;")
-        stop_resp = self.receive_msg()
-        if stop_resp and stop_resp.get("TYPE") == "TEST":
-            if stop_resp.get("RESULT") == "STOPPED":
-                self.receive_msg()  # receive the IDLE message
-                return 0, "Test successfully stopped."
-            elif stop_resp.get("RESULT") == "ERROR2":
-                # ERROR2 - client tried to stop a test on a device that is not running a test
-                return 2, stop_resp["MSG"]
-        return -1, "Invalid response from server."
+        
+        while True:
+            stop_resp = self.receive_msg()
+            
+            if stop_resp and stop_resp.get("TYPE") == "TEST":
+                if stop_resp.get("RESULT") == "STOPPED":
+                    # Get IDLE message
+                    idle_resp = self.receive_msg()
+                    if idle_resp and idle_resp.get("TYPE") == "STATUS":
+                        return 0, "Test successfully stopped."
+                elif stop_resp.get("RESULT") == "ERROR2":
+                    # ERROR2 - client tried to stop a test on a device that is not running a test
+                    return 2, stop_resp["MSG"]
+            elif stop_resp and stop_resp.get("TYPE") == "STATUS":
+                if stop_resp.get("STATE") == "IDLE":
+                    # received IDLE message first
+                    # get STOPPED Message
+                    stop_msg = self.receive_msg()
+                    if stop_msg and stop_msg.get("TYPE") == "TEST" and stop_msg.get("RESULT") == "STOPPED":
+                            return 0, "Test successfully stopped."
+                else:
+                    # received test status message, get next message
+                    continue
+            print("Invalid response from server: ", stop_resp)
+            return -1, "Invalid response from server."
 
     def get_status(self):
         """
