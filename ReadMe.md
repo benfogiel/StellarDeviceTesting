@@ -19,11 +19,11 @@ Ensure you have a running simulated device (see 'Usage: C++ Simulated Device').
 1. Install dependencies:
 
    - Install Qt5 from [here](https://wiki.qt.io/Install_Qt_5_on_Ubuntu). Ensure that `$QMAKE` is set to your `/qmake` file path.
-   - From the root directory, run `pip install -r comm_program/requirements.txt`
+   - From the root directory, run `pip3 install -r requirements.txt`
 
    NOTE: If pip hangs during the installation of PyQt5, you may need to install it using the following command: `pip install pyqt5 --config-settings --confirm-license= --verbose`
 
-2. Run the program. From the root directory, run `python3 -m comm_program.comm_program`.
+2. Run the program. From the root directory, run `python3 comm_program.py`.
 3. Click `Add Device` and enter a name for the device.
 4. Navigate to the `Connect` tab, input the IP address and port of the simulated device, and click `Connect`. If the connection is successful, the text at the top will change to `Connected to <device name> (<device serial number>)`.
 5. Go to the `Test` tab, enter a test duration, and click `Run Test`. The test data will be plotted in real time, and the `Save` button will be enabled, allowing you to save the data to a PDF file.

@@ -24,9 +24,9 @@ public:
     bool is_idle_ = true;
 
     // Accessor functions
-    std::string get_model() const { return this->model_; }
-    int get_serial_number() const { return this->serial_number_; }
-    bool get_is_idle() const { return this->is_idle_; }
+    std::string model() const { return model_; }
+    int serial_number() const { return serial_number_; }
+    bool is_idle() const { return is_idle_; }
 
     // Mutator functions
     void set_is_idle(bool state) { this->is_idle_ = state; }
@@ -62,13 +62,11 @@ public:
     void start()
     {
         this->server_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-        if (server_fd_ < 0)
+        if (server_fd_ < 0 || bind(server_fd_, (sockaddr *)&server_addr_, sizeof(server_addr_)) < 0)
         {
-            std::cerr << "Error creating socket." << std::endl;
-        }
-        else if (bind(server_fd_, (sockaddr *)&this->server_addr_, sizeof(this->server_addr_)) < 0)
-        {
-            std::cerr << "Error binding socket to address." << std::endl;
+            perror("Error initializing server");
+            close(server_fd_);
+            return;
         }
         else
         {
@@ -98,7 +96,7 @@ private:
             ssize_t received_bytes = recvfrom(server_fd_, buffer, sizeof(buffer), 0, (sockaddr *)&client_addr, &client_addr_len);
             if (received_bytes < 0)
             {
-                std::cerr << "Error receiving data." << std::endl;
+                perror("Error receiving data");
                 return;
             }
 
@@ -135,12 +133,12 @@ private:
         ssize_t sent_bytes = sendto(server_fd_, to_iso_8859_1(frmt_msg).c_str(), frmt_msg.length(), 0, (const sockaddr *)&client_addr, sizeof(client_addr));
         if (sent_bytes < 0)
         {
-            std::cerr << "Error sending data." << std::endl;
+            perror("Error sending message");
             return;
         }
         else if (static_cast<size_t>(sent_bytes) != frmt_msg.length())
         {
-            std::cerr << "Warning: Partial data sent." << std::endl;
+            std::cerr << "Warning: Partial message sent." << std::endl;
         }
     }
 
@@ -187,8 +185,8 @@ private:
         if (request.find("TYPE") != request.end() && request["TYPE"] == "ID")
         {
             send_message({{"TYPE", "ID"},
-                          {"MODEL", this->device_.get_model()},
-                          {"SERIAL", std::to_string(this->device_.get_serial_number())}},
+                          {"MODEL", this->device_.model()},
+                          {"SERIAL", std::to_string(this->device_.serial_number())}},
                          client_addr);
             return;
         }
@@ -254,7 +252,7 @@ private:
                      client_addr);
 
         test_running_ = true;
-        while (this->device_.get_is_idle() == false && std::chrono::steady_clock::now() <= end_time)
+        while (this->device_.is_idle() == false && std::chrono::steady_clock::now() <= end_time)
         {
             send_message({{"TYPE", "STATUS"},
                           {"TIME", std::to_string(
@@ -268,7 +266,7 @@ private:
             std::this_thread::sleep_for(rate);
         }
         test_running_ = false;
-        if (this->device_.get_is_idle() == false) // in the case that the test was stopped early
+        if (this->device_.is_idle() == false) // in the case that the test was stopped early
         {
             this->device_.set_is_idle(true);
             send_message({{"TYPE", "STATUS"}, {"STATE", "IDLE"}}, client_addr);
@@ -294,7 +292,7 @@ private:
 int main(int argc, char *argv[])
 {
     // Check for correct number of command-line arguments
-    if (argc != 2 & argc != 4)
+    if (argc != 2 && argc != 4)
     {
         std::cerr << "Usage: " << argv[0] << " <port>";
         std::cerr << " OR: " << argv[0] << " <port> <model> <serial>" << std::endl;

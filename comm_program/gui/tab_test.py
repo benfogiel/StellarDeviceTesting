@@ -2,6 +2,7 @@
 This module provides a TestTab widget that runs and displays test data.
 """
 
+from typing import TYPE_CHECKING
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -21,21 +22,31 @@ from PyQt5.QtGui import (
     QTextBlockFormat,
     QDoubleValidator,
 )
-from PyQt5.QtChart import QChart, QChartView, QLineSeries, QValueAxis
+from PyQt5.QtChart import (
+    QChart,
+    QChartView,
+    QLineSeries,
+    QValueAxis,
+    QAbstractAxis,
+    QAbstractSeries,
+)
 from PyQt5.QtCore import Qt, QObject, QTimer
 
+if TYPE_CHECKING:
+    from comm_program.gui.selected_device import SelectedDevice
 
-INTERVAL = 500  # ms
+
+TEST_RATE = 250  # ms
 
 
 class TestTab(QWidget):
     """Test Tab widget for connected device."""
 
-    def __init__(self, device):
+    def __init__(self, device: "SelectedDevice") -> None:
         """Initialize the TestTab widget.
 
         Args:
-            device (Device): The connected device that is associated with this tab.
+            device (SelectedDevice): The connected device that is associated with this tab.
         """
         super().__init__()
         self.device = device
@@ -46,9 +57,16 @@ class TestTab(QWidget):
         self.mv_series = QLineSeries()
         self.ma_series = QLineSeries()
 
+        self.worker = None
+
+        self.mv_chart = None
+        self.ma_chart = None
+        self.mv_chart_view = None
+        self.ma_chart_view = None
+        self.save_button = None
         self.build_test_tab()
 
-    def build_test_tab(self):
+    def build_test_tab(self) -> None:
         """Build the TestTab widget."""
         run_test_layout = QVBoxLayout()
 
@@ -76,7 +94,7 @@ class TestTab(QWidget):
 
         self.setLayout(main_layout)
 
-    def build_plots(self):
+    def build_plots(self) -> QHBoxLayout:
         """Build the plots for the TestTab widget.
 
         Returns:
@@ -90,25 +108,20 @@ class TestTab(QWidget):
         self.mv_chart.addSeries(self.mv_series)
         self.ma_chart.addSeries(self.ma_series)
 
-        # millivolt chart
-        self.axis_X_mv = QValueAxis()
-        self.axis_Y_mv = QValueAxis()
-        self.axis_X_mv.setTitleText("Time (s)")
-        self.axis_Y_mv.setTitleText("Millivolts")
-        self.mv_chart.addAxis(self.axis_X_mv, Qt.AlignBottom)
-        self.mv_chart.addAxis(self.axis_Y_mv, Qt.AlignLeft)
-        self.mv_series.attachAxis(self.axis_X_mv)
-        self.mv_series.attachAxis(self.axis_Y_mv)
+        axis_titles = [("Time (s)", "Millivolts"), ("Time (s)", "Milliamps")]
 
-        # milliamp chart
-        self.axis_X_ma = QValueAxis()
-        self.axis_Y_ma = QValueAxis()
-        self.axis_X_ma.setTitleText("Time (s)")
-        self.axis_Y_ma.setTitleText("Milliamps")
-        self.ma_chart.addAxis(self.axis_X_ma, Qt.AlignBottom)
-        self.ma_chart.addAxis(self.axis_Y_ma, Qt.AlignLeft)
-        self.ma_series.attachAxis(self.axis_X_ma)
-        self.ma_series.attachAxis(self.axis_Y_ma)
+        for chart, series, titles in zip(
+            [self.mv_chart, self.ma_chart],
+            [self.mv_series, self.ma_series],
+            axis_titles,
+        ):
+            axis_x, axis_y = QValueAxis(), QValueAxis()
+            axis_x.setTitleText(titles[0])
+            axis_y.setTitleText(titles[1])
+            chart.addAxis(axis_x, Qt.AlignBottom)
+            chart.addAxis(axis_y, Qt.AlignLeft)
+            series.attachAxis(axis_x)
+            series.attachAxis(axis_y)
 
         # Set chart titles
         self.mv_chart.setTitle("Millivolt Test Metrics")
@@ -149,7 +162,7 @@ class TestTab(QWidget):
 
         return plot_layout
 
-    def run_test(self):
+    def run_test(self) -> None:
         """Run the test."""
         if (
             self.run_test_button.text() == "Run Test"
@@ -158,11 +171,14 @@ class TestTab(QWidget):
             # clear series
             self.mv_series.clear()
             self.ma_series.clear()
-            self.worker = Worker(self, INTERVAL)
-            self.device.connected_device.start_test(
-                float(self.test_duration_input.text()), INTERVAL
+            self.worker = Worker(self, TEST_RATE)
+            success = self.device.start_device_test(
+                float(self.test_duration_input.text()), TEST_RATE
             )
-            self.worker.start()
+            if success:
+                self.worker.start()
+            else:
+                self.worker = None
         elif self.run_test_button.text() == "Stop Test":
             reply = QMessageBox.question(
                 self,
@@ -175,21 +191,31 @@ class TestTab(QWidget):
                 # check status of worker
                 if self.worker.running:
                     self.worker.stop(force=True)
-                del self.worker
+                self.worker = None
                 self.run_test_button.setText("Run Test")
 
-    def update_plots(self, time, mv, ma):
-        """Update the plots with new data."""
+    def update_plots(self, time: float, mv: float, ma: float) -> None:
+        """Update the plots with new data.
+
+        Args:
+            time (float): The time in seconds.
+            mv (float): The millivolt value.
+            ma (float): The milliamp value.
+        """
         self.save_button.setEnabled(True)
         self.mv_series.append(float(time), float(mv))
         self.ma_series.append(float(time), float(ma))
-        update_axis_range(self.mv_series, self.axis_X_mv, self.axis_Y_mv)
-        update_axis_range(self.ma_series, self.axis_X_ma, self.axis_Y_ma)
+        update_axis_range(
+            self.mv_series, self.mv_chart.axes()[0], self.mv_chart.axes()[1]
+        )
+        update_axis_range(
+            self.ma_series, self.ma_chart.axes()[0], self.ma_chart.axes()[1]
+        )
 
         self.ma_chart_view.update()
         self.mv_chart_view.update()
 
-    def save_results(self):
+    def save_results(self) -> None:
         """Save the results of the test to a PDF file."""
         file_name = self.pick_file()
         if not file_name:
@@ -199,7 +225,6 @@ class TestTab(QWidget):
         ma_chart_cp = copy_chart_properties(self.ma_chart)
         mv_analysis = analyze_data(self.mv_series)
         ma_analysis = analyze_data(self.ma_series)
-        print(mv_analysis)
 
         # Create a QTextDocument
         doc = QTextDocument()
@@ -214,9 +239,10 @@ class TestTab(QWidget):
 
         # Insert description
         cursor.insertHtml(
-            "<p>This document presents the results of a test device on a Rocket Lab Electron rocket. "
-            "The data is presented in two charts, showcasing the millivolt and milliamp outputs of the device. "
-            "Fasten your seatbelts and prepare for a thrilling data-driven journey into the stratosphere of rocket science!</p><br>"
+            "<p>This document presents the results of a test device on a Rocket Lab Electron "
+            + "rocket. The data is presented in two charts, showcasing the millivolt and milliamp "
+            + "outputs of the device. Fasten your seatbelts and prepare for a thrilling "
+            + "data-driven journey into the current condition of the Electron Rocket!</p><br>"
         )
 
         block_format = QTextBlockFormat()
@@ -229,11 +255,12 @@ class TestTab(QWidget):
         cursor.insertHtml("<i>Chart 1: Millivolt outputs of the test device</i>")
 
         cursor.insertHtml(
-            "<br><p>As we can see in Chart 1, the millivolt outputs of our test device provide valuable insights "
-            "into the electrifying performance of the Electron rocket. We have a maximum millivolt value of"
-            f" {round(mv_analysis['max'],2)} millivolts, minimum of {round(mv_analysis['min'],2)} millivolts"
-            f" and an average of {round(mv_analysis['avg'],2)} millivolts over a total duration of"
-            f" {round(mv_analysis['duration'],2)} seconds.</p>"
+            "<br><p>As we can see in Chart 1, the millivolt outputs of our test device provide "
+            + "valuable insights into the performance of the Electron rocket. We "
+            + f"have a maximum millivolt value of {round(mv_analysis['max'],2)} millivolts, "
+            + f"minimum of {round(mv_analysis['min'],2)} millivolts and an average of "
+            + f"{round(mv_analysis['avg'],2)} millivolts over a total duration of"
+            + f" {round(mv_analysis['duration'],2)} seconds.</p>"
         )
 
         image2 = format_chart(ma_chart_cp).toImage()
@@ -245,24 +272,24 @@ class TestTab(QWidget):
 
         cursor.insertHtml(
             "<br><p>As we can see in Chart 2, we have a maximum millivolt value of"
-            f" {round(ma_analysis['max'],2)} millivolts, minimum of {round(ma_analysis['min'],2)} millivolts"
-            f" and an average of {round(ma_analysis['avg'],2)} millivolts over a total duration of"
-            f" {round(ma_analysis['duration'],2)} seconds.</p>"
+            + f" {round(ma_analysis['max'],2)} millivolts, minimum of "
+            + f"{round(ma_analysis['min'],2)} millivolts and an average of "
+            + f"{round(ma_analysis['avg'],2)} millivolts over a total duration of"
+            + f" {round(ma_analysis['duration'],2)} seconds.</p>"
         )
 
         # Insert conclusion
         cursor.movePosition(QTextCursor.End)
         cursor.insertHtml(
-            "<br><p>In conclusion, the data from our Rocket Lab Electron test device demonstrates the "
-            "awe-inspiring power and performance of this advanced rocket. As we venture further into the cosmos, "
-            "we can only imagine what other electrifying discoveries await us.</p>"
+            "<br><p>In conclusion, the data from our Rocket Lab Electron test device "
+            + "proves that the vehicle is in good condition and is ready to launch!"
         )
 
         # Save the QTextDocument to a PDF file
         pdf_writer = QPdfWriter(file_path)
         doc.print_(pdf_writer)
 
-    def pick_file(self):
+    def pick_file(self) -> None:
         """Open a file dialog to pick a file to save to."""
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
@@ -276,32 +303,35 @@ class TestTab(QWidget):
 class Worker(QObject):
     """Worker that listens for test data and updates plots"""
 
-    def __init__(self, testTab, interval):
+    def __init__(self, test_tab: TestTab, interval: int) -> None:
         """Initialize the worker.
 
         Args:
-            testTab (TestTab): The TestTab that the worker is running in.
+            test_tab (TestTab): The TestTab that the worker is running in.
             interval (int): The interval at which to update the plots (units: ms)
         """
-        super(Worker, self).__init__()
-        self.device = testTab.device
-        self.update_plot_func = testTab.update_plots
-        self.timer = QTimer(self, interval=interval, timeout=self.execute)
-        self.run_test_button = testTab.run_test_button
-        self.test_status = testTab.test_status
+        super().__init__()
+        self.device = test_tab.device
+        self.update_plot_func = test_tab.update_plots
+        self.timer = QTimer(self)
+        self.timer.setInterval(interval)
+        self.timer.timeout.connect(self.execute)
+        self.run_test_button = test_tab.run_test_button
+        self.test_status = test_tab.test_status
+        self.consecutive_timeout_responses = 0
 
     @property
-    def running(self):
+    def running(self) -> None:
         """Return whether the worker is running or not."""
         return self.timer.isActive()
 
-    def start(self):
+    def start(self) -> None:
         """Start the worker."""
         self.timer.start()
         self.run_test_button.setText("Stop Test")
         self.test_status.setText("Status: Test Running...")
 
-    def stop(self, force=False):
+    def stop(self, force=False) -> None:
         """Stop the worker.
 
         Args:
@@ -309,11 +339,11 @@ class Worker(QObject):
         """
         self.timer.stop()
         if force:
-            self.device.connected_device.stop_test()
+            self.device.stop_device_test()
         self.run_test_button.setText("Run Test")
         self.test_status.setText("Status: No Test Running")
 
-    def execute(self):
+    def execute(self) -> None:
         """Execute the worker.
 
         Raises:
@@ -321,41 +351,36 @@ class Worker(QObject):
         """
         status = self.device.connected_device.get_status()
         if status is None:
+            self.consecutive_timeout_responses += 1
+            if self.consecutive_timeout_responses > 1:
+                self.stop(force=True)
             return
-        elif isinstance(status, tuple):
-            self.update_plot_func(*status)
-        elif isinstance(status, str) and status == "IDLE":
+        self.consecutive_timeout_responses = 0
+        if status.get("state") == "TESTING":
+            self.update_plot_func(*status["msg"])
+        elif status.get("state") == "IDLE":
             self.stop()
         else:
             raise ValueError("invalid return from get_status: ", status)
 
 
-def update_axis_range(series, axisX, axisY):
+def update_axis_range(
+    series: QAbstractSeries, axis_x: QValueAxis, axis_y: QValueAxis
+) -> None:
     """Update the range of an axis based on the range of a series
 
     Args:
         series (QAbstractSeries): The series to use to update the axis range.
-        axisX (QValueAxis): The X axis to update.
-        axisY (QValueAxis): The Y axis to update.
+        axis_x (QValueAxis): The X axis to update.
+        axis_y (QValueAxis): The Y axis to update.
     """
-    x_min, x_max, y_min, y_max = (
-        float("inf"),
-        float("-inf"),
-        float("inf"),
-        float("-inf"),
-    )
-
-    for point in series.pointsVector():
-        x_min = min(x_min, point.x())
-        x_max = max(x_max, point.x())
-        y_min = min(y_min, point.y())
-        y_max = max(y_max, point.y())
-
-    axisX.setRange(x_min, x_max)
-    axisY.setRange(y_min, y_max)
+    points = series.pointsVector()
+    xs, ys = zip(*[(point.x(), point.y()) for point in points])
+    axis_x.setRange(min(xs), max(xs))
+    axis_y.setRange(min(ys), max(ys))
 
 
-def copy_series(series):
+def copy_series(series: QAbstractSeries) -> QAbstractSeries:
     """Copy a series.
 
     Args:
@@ -364,17 +389,16 @@ def copy_series(series):
     Returns:
         QAbstractSeries: A copy of the series.
     """
-    if isinstance(series, QLineSeries):
-        new_series = QLineSeries()
-        new_series.replace(series.pointsVector())
-    else:
+    if not isinstance(series, QLineSeries):
         raise NotImplementedError("Series type not supported")
 
+    new_series = QLineSeries()
+    new_series.replace(series.pointsVector())
     new_series.setName(series.name())
     return new_series
 
 
-def copy_axis(axis):
+def copy_axis(axis: QAbstractAxis) -> QAbstractAxis:
     """Copy an axis.
 
     Args:
@@ -386,23 +410,22 @@ def copy_axis(axis):
     Raises:
         NotImplementedError: If the axis type is not supported.
     """
-    if isinstance(axis, QValueAxis):
-        new_axis = QValueAxis()
-        new_axis.setRange(axis.min(), axis.max())
-        new_axis.setLabelFormat(axis.labelFormat())
-        new_axis.setTitleText(axis.titleText())
-        new_axis.setTickCount(axis.tickCount())
-        new_axis.setMinorTickCount(axis.minorTickCount())
-        new_axis.setLabelsVisible(axis.labelsVisible())
-        new_axis.setGridLineVisible(axis.isGridLineVisible())
-        new_axis.setMinorGridLineVisible(axis.isMinorGridLineVisible())
-    else:
+    if not isinstance(axis, QValueAxis):
         raise NotImplementedError("Axis type not supported")
 
+    new_axis = QValueAxis()
+    new_axis.setRange(axis.min(), axis.max())
+    new_axis.setLabelFormat(axis.labelFormat())
+    new_axis.setTitleText(axis.titleText())
+    new_axis.setTickCount(axis.tickCount())
+    new_axis.setMinorTickCount(axis.minorTickCount())
+    new_axis.setLabelsVisible(axis.labelsVisible())
+    new_axis.setGridLineVisible(axis.isGridLineVisible())
+    new_axis.setMinorGridLineVisible(axis.isMinorGridLineVisible())
     return new_axis
 
 
-def copy_chart_properties(chart):
+def copy_chart_properties(chart: QChart) -> QChart:
     """Copy the properties of a chart.
 
     Args:
@@ -418,39 +441,36 @@ def copy_chart_properties(chart):
     new_chart.setTheme(chart.theme())
     new_chart.setMargins(chart.margins())
 
-    axis_series_map = {}
+    axis_series_map = {
+        axis: [
+            series
+            for series in chart.series()
+            if (
+                axis.min() <= series.at(0).x() <= axis.max()
+                if axis.orientation() == Qt.Horizontal
+                else axis.min() <= series.at(0).y() <= axis.max()
+            )
+        ]
+        for axis in chart.axes()
+    }
 
     for series in chart.series():
         new_series = copy_series(series)
         new_chart.addSeries(new_series)
 
-        for axis in chart.axes():
-            if axis not in axis_series_map:
-                axis_series_map[axis] = []
-
-            if series in axis_series_map[axis]:
+        for axis, mapped_series in axis_series_map.items():
+            if series not in mapped_series:
                 continue
 
-            if axis.orientation() == Qt.Horizontal:
-                if axis.min() <= series.at(0).x() <= axis.max():
-                    axis_series_map[axis].append(series)
-            else:  # axis.orientation() == Qt.Vertical
-                if axis.min() <= series.at(0).y() <= axis.max():
-                    axis_series_map[axis].append(series)
-
-    for axis in chart.axes():
-        new_axis = copy_axis(axis)
-        new_chart.addAxis(new_axis, axis.alignment())
-        for series in axis_series_map[axis]:
-            new_series = new_chart.series()[chart.series().index(series)]
+            new_axis = copy_axis(axis)
+            new_chart.addAxis(new_axis, axis.alignment())
             new_series.attachAxis(new_axis)
 
     new_chart.setAcceptHoverEvents(chart.acceptHoverEvents())
-
     return new_chart
 
 
-def format_chart(chart):
+def format_chart(chart: QChart) -> QChart:
     """Format a chart.
 
     Args:
@@ -466,12 +486,12 @@ def format_chart(chart):
     return img
 
 
-def qline_series_to_list(series):
+def qline_series_to_list(series: QLineSeries) -> list[tuple[float, float]]:
     """Convert a QLineSeries to a list of points.
-    
+
     Args:
         series (QLineSeries): The series to convert.
-    
+
     Returns:
         list: A list of points.
     """
@@ -481,7 +501,8 @@ def qline_series_to_list(series):
         points_list.append((point.x(), point.y()))
     return points_list
 
-def analyze_data(series):
+
+def analyze_data(series: QLineSeries) -> dict[str, float]:
     """Analyze the data from a test.
 
     Args:
@@ -490,16 +511,13 @@ def analyze_data(series):
     Returns:
         dict: A dictionary containing the analysis results.
     """
-    series_list = qline_series_to_list(series)
-
-    max_val = max(series_list, key=lambda x: x[1])[1]
-    min_val = min(series_list, key=lambda x: x[1])[1]
-    avg_val = sum([x[1] for x in series_list]) / len(series_list)
-    duration = series_list[-1][0] - series_list[0][0]
+    points_list = qline_series_to_list(series)
+    values = [y for _, y in points_list]
+    duration = points_list[-1][0] - points_list[0][0]
 
     return {
-        "max": max_val,
-        "min": min_val,
-        "avg": avg_val,
+        "max": max(values),
+        "min": min(values),
+        "avg": sum(values) / len(values),
         "duration": duration,
     }
